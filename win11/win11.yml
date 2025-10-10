@@ -1,0 +1,287 @@
+---
+- name: Windows 11 - fully patch via Windows Update
+  hosts: windows
+  gather_facts: false
+
+  vars_files:
+    - vault.yml
+
+  vars:
+    update_categories:
+      - SecurityUpdates
+      - CriticalUpdates
+      - UpdateRollups
+      - DefinitionUpdates
+      - Updates
+
+  tasks:
+    # --- Prep PowerShellGet / PSGallery so PSWindowsUpdate installs cleanly ---
+
+    - name: Force TLS 1.2 for PowerShell web requests
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Microsoft\.NETFramework\v4.0.30319
+        name: SchUseStrongCrypto
+        data: 1
+        type: dword
+
+    - name: Ensure NuGet package provider is installed
+      ansible.windows.win_shell: >
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope AllUsers
+      args:
+        executable: PowerShell
+      changed_when: false  # idempotent enough for our purposes
+
+    - name: Trust PSGallery repository (AllUsers)
+      ansible.windows.win_shell: >
+        Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted
+      args:
+        executable: PowerShell
+      changed_when: false
+
+    - name: Ensure PSWindowsUpdate module is installed (from PSGallery)
+      community.windows.win_psmodule:
+        name: PSWindowsUpdate
+        state: present
+        repository: PSGallery
+        scope: AllUsers
+        trust_repository: true
+        skip_publisher_check: true
+
+    - name: Install PSReadLine module (from PSGallery)
+      ansible.windows.win_shell: |
+        Install-Module -Name PSReadLine -Repository PSGallery -Scope AllUsers -Force -AllowPrerelease
+      changed_when: false
+
+    # --- Run updates repeatedly until no more updates and no reboot needed ---
+
+    - name: Install available Windows updates (reboot as needed)
+      ansible.windows.win_updates:
+        category_names: "{{ update_categories }}"
+        state: installed
+        reboot: true
+        reboot_timeout: 3600
+      register: wu_result
+      # Loop until fully patched: no reboot required AND no updates remaining
+      until: (not wu_result.reboot_required | default(false)) and
+             ((wu_result.updates | default([])) | length == 0)
+      retries: 6
+      delay: 30
+
+    - name: Show final update summary
+      ansible.builtin.debug:
+        var: wu_result
+
+    # --- Windows Activation ---
+
+    - name: Check current Windows activation status
+      ansible.windows.win_shell: |
+        $license = Get-CimInstance -ClassName SoftwareLicensingProduct | Where-Object { $_.PartialProductKey -ne $null }
+        @{
+          LicenseStatus = $license.LicenseStatus
+          LicenseStatusReason = $license.LicenseStatusReason
+          Description = $license.Description
+          PartialProductKey = $license.PartialProductKey
+        } | ConvertTo-Json
+      register: activation_check
+      changed_when: false
+
+    - name: Parse activation status
+      ansible.builtin.set_fact:
+        activation_info: "{{ activation_check.stdout | from_json }}"
+        is_activated: "{{ (activation_check.stdout | from_json).LicenseStatus == 1 }}"
+
+    - name: Install Windows product key
+      ansible.windows.win_shell: |
+        cscript.exe //B //Nologo C:\Windows\System32\slmgr.vbs /ipk {{ windows_product_key }}
+      when: not is_activated
+      register: install_key_result
+
+    - name: Activate Windows
+      ansible.windows.win_shell: |
+        cscript.exe //B //Nologo C:\Windows\System32\slmgr.vbs /ato
+      when: not is_activated
+      register: activation_result
+
+    - name: Show activation status
+      ansible.builtin.debug:
+        msg: "Windows is {{ 'already activated' if is_activated else 'now activated' }} (Partial Key: {{ activation_info.PartialProductKey | default('N/A') }})"
+
+    # --- Time Zone Configuration ---
+
+    - name: Set time zone to Eastern Standard Time
+      community.windows.win_timezone:
+        timezone: Eastern Standard Time
+
+    # --- Developer Mode ---
+
+    - name: Enable Developer Mode
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock
+        name: AllowDevelopmentWithoutDevLicense
+        data: 1
+        type: dword
+
+    - name: Set PowerShell execution policy to RemoteSigned
+      ansible.windows.win_shell: |
+        $current = Get-ExecutionPolicy -Scope LocalMachine
+        if ($current -ne 'RemoteSigned') {
+          Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
+        }
+      changed_when: false
+
+    # --- SSH Key Generation ---
+
+    - name: Ensure .ssh directory exists for user
+      ansible.windows.win_file:
+        path: C:\Users\{{ windows_user }}\.ssh
+        state: directory
+
+    - name: Check if SSH key exists for user
+      ansible.windows.win_stat:
+        path: C:\Users\{{ windows_user }}\.ssh\id_rsa
+      register: ssh_key_check
+
+    - name: Generate SSH key with passphrase for user
+      ansible.windows.win_shell: |
+        ssh-keygen -t rsa -b 4096 -f C:\Users\{{ windows_user }}\.ssh\id_rsa -N "{{ ssh_passphrase }}" -C "{{ windows_user }}@{{ ansible_hostname }}"
+      when: not ssh_key_check.stat.exists
+
+    # --- Chocolatey Package Manager ---
+
+    - name: Install Chocolatey
+      ansible.windows.win_shell: |
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+      args:
+        creates: C:\ProgramData\chocolatey\bin\choco.exe
+
+    - name: Install Git via Chocolatey
+      ansible.windows.win_shell: |
+        choco install git -y
+      args:
+        creates: C:\Program Files\Git\bin\git.exe
+
+    - name: Configure Git user name
+      ansible.windows.win_shell: |
+        git config --global user.name "{{ git_user_name }}"
+      changed_when: false
+
+    - name: Configure Git user email
+      ansible.windows.win_shell: |
+        git config --global user.email {{ git_user_email }}
+      changed_when: false
+
+    - name: Install GitHub CLI via Chocolatey
+      ansible.windows.win_shell: |
+        choco install gh -y
+      args:
+        creates: C:\Program Files\GitHub CLI\gh.exe
+
+    - name: Install Azure CLI via Chocolatey
+      ansible.windows.win_shell: |
+        choco install azure-cli -y
+      args:
+        creates: C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd
+
+    - name: Install Azure PowerShell module (from PSGallery)
+      ansible.windows.win_shell: |
+        Install-Module -Name Az -Repository PSGallery -Scope AllUsers -Force -AllowClobber
+      changed_when: false
+
+    - name: Install Microsoft Graph PowerShell module (from PSGallery)
+      ansible.windows.win_shell: |
+        Install-Module -Name Microsoft.Graph -Repository PSGallery -Scope AllUsers -Force -AllowClobber
+      changed_when: false
+
+    - name: Install Visual C++ Redistributable packages
+      ansible.windows.win_shell: |
+        choco install vcredist-all -y
+      args:
+        creates: C:\ProgramData\chocolatey\lib\vcredist-all
+
+    # --- Taskbar Personalization ---
+
+    - name: Get logged-in user SID
+      ansible.windows.win_shell: |
+        $loggedInUser = Get-WmiObject -Class Win32_ComputerSystem | Select-Object -ExpandProperty UserName
+        $userSID = (New-Object System.Security.Principal.NTAccount($loggedInUser)).Translate([System.Security.Principal.SecurityIdentifier]).Value
+        Write-Output $userSID
+      register: user_sid_result
+      changed_when: false
+
+    - name: Set user SID fact
+      ansible.builtin.set_fact:
+        user_sid: "{{ user_sid_result.stdout | trim }}"
+
+    - name: Hide taskbar search
+      ansible.windows.win_regedit:
+        path: HKU:\{{ user_sid }}\Software\Microsoft\Windows\CurrentVersion\Search
+        name: SearchboxTaskbarMode
+        data: 0
+        type: dword
+      register: taskbar_search
+
+    - name: Hide taskbar Task View button
+      ansible.windows.win_regedit:
+        path: HKU:\{{ user_sid }}\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+        name: ShowTaskViewButton
+        data: 0
+        type: dword
+      register: taskbar_taskview
+
+    - name: Hide taskbar Widgets
+      ansible.windows.win_regedit:
+        path: HKU:\{{ user_sid }}\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+        name: TaskbarDa
+        data: 0
+        type: dword
+      register: taskbar_widgets
+
+    - name: Hide taskbar Chat
+      ansible.windows.win_regedit:
+        path: HKU:\{{ user_sid }}\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+        name: TaskbarMn
+        data: 0
+        type: dword
+      register: taskbar_chat
+
+    - name: Set accent color to automatic
+      ansible.windows.win_regedit:
+        path: HKU:\{{ user_sid }}\Control Panel\Desktop
+        name: AutoColorization
+        data: 1
+        type: dword
+      register: accent_color
+
+    - name: Disable Windows Spotlight on lock screen (use Picture instead)
+      ansible.windows.win_regedit:
+        path: HKU:\{{ user_sid }}\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager
+        name: RotatingLockScreenEnabled
+        data: 0
+        type: dword
+      register: lock_screen_picture
+
+    - name: Disable recently added apps in Start menu
+      ansible.windows.win_regedit:
+        path: HKU:\{{ user_sid }}\Software\Policies\Microsoft\Windows\Explorer
+        name: HideRecentlyAddedApps
+        data: 1
+        type: dword
+      register: start_recent_apps
+
+    - name: Disable recently opened items in Start, Jump Lists, and File Explorer
+      ansible.windows.win_regedit:
+        path: HKU:\{{ user_sid }}\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+        name: Start_TrackDocs
+        data: 0
+        type: dword
+      register: start_recent_docs
+
+    - name: Reboot if personalization settings changed
+      ansible.windows.win_reboot:
+        reboot_timeout: 600
+        post_reboot_delay: 60
+        test_command: whoami
+        connect_timeout: 10
+      when: taskbar_search.changed or taskbar_taskview.changed or taskbar_widgets.changed or taskbar_chat.changed or accent_color.changed or lock_screen_picture.changed or start_recent_apps.changed or start_recent_docs.changed

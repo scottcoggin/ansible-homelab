@@ -1,0 +1,34 @@
+# Ignore ALL .ini files (inventories, secrets, etc.)
+*.ini
+**/*.ini
+
+# But keep ansible.cfg (and other whitelisted configs)
+!ansible.cfg
+
+# Ignore Ansible cache and local state
+.ansible/
+*.retry
+
+# Ignore vault files with secrets
+vault.yml
+**/vault.yml
+
+# Python virtual environments
+.venv/
+env/
+venv/
+
+# Python cache/compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# System/editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Don't track meta files
+.claude/

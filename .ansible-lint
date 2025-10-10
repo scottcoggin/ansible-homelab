@@ -1,0 +1,13 @@
+---
+# Ansible-lint configuration
+
+# Skip the internal-error rule for playbooks with vault files
+# The vault.yml file is encrypted and gitignored, so linting will fail
+# without the vault password. Since vault files are gitignored and contain
+# sensitive data, we skip this check.
+skip_list:
+  - internal-error
+
+exclude_paths:
+  - .github/
+  - .git/

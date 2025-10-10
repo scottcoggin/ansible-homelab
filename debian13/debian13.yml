@@ -1,0 +1,157 @@
+---
+- name: Update/upgrade apt, install tools, configure zsh, add Azure CLI and Terraform
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars:
+    base_packages:
+      - curl
+      - git
+      - vim
+      - zsh
+      - texlive-full
+      - chktex
+      - latexmk
+
+    # Map Debian codename to a repo codename Microsoft actually serves
+    azure_cli_codename_map:
+      trixie: bookworm
+      bookworm: bookworm
+      bullseye: bullseye
+    azure_cli_codename: >-
+      {{ azure_cli_codename_map.get(ansible_facts['lsb']['codename'] | default(''), 'bookworm') }}
+
+    # Map architecture for repos
+    azure_cli_arch_map:
+      x86_64: amd64
+      amd64: amd64
+      aarch64: arm64
+      arm64: arm64
+      armv7l: armhf
+      armhf: armhf
+    azure_cli_arch: >-
+      {{ azure_cli_arch_map.get(ansible_architecture | default('x86_64'), 'amd64') }}
+
+  tasks:
+    # --- CLEANUP FIRST: remove any stale custom repo files you manage ---
+    - name: Remove any stale repo files
+      ansible.builtin.file:
+        path: "/etc/apt/sources.list.d/{{ item }}"
+        state: absent
+      loop:
+        - azure-cli.list
+        - hashicorp.list
+
+    - name: Update apt cache and upgrade packages
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: true
+        cache_valid_time: 3600
+
+    - name: Ensure base packages are installed
+      ansible.builtin.apt:
+        name: "{{ base_packages }}"
+        state: present
+
+    - name: Set zsh as default shell for SSH user
+      ansible.builtin.user:
+        name: "{{ ansible_ssh_user | default(ansible_user) }}"
+        shell: /usr/bin/zsh
+
+    - name: Ensure ~/bin exists
+      ansible.builtin.file:
+        path: "/home/{{ ansible_ssh_user | default(ansible_user) }}/bin"
+        state: directory
+        owner: "{{ ansible_ssh_user | default(ansible_user) }}"
+        mode: '0755'
+
+    - name: Download antigen.zsh
+      ansible.builtin.get_url:
+        url: https://git.io/antigen
+        dest: "/home/{{ ansible_ssh_user | default(ansible_user) }}/bin/antigen.zsh"
+        mode: '0644'
+        owner: "{{ ansible_ssh_user | default(ansible_user) }}"
+
+    - name: Ensure env.sh exists in ~/bin
+      ansible.builtin.file:
+        path: "/home/{{ ansible_ssh_user | default(ansible_user) }}/bin/env.sh"
+        state: touch
+        owner: "{{ ansible_ssh_user | default(ansible_user) }}"
+        mode: '0644'
+
+    - name: Deploy .zshrc
+      ansible.builtin.copy:
+        src: zshrc
+        dest: "/home/{{ ansible_ssh_user | default(ansible_user) }}/.zshrc"
+        owner: "{{ ansible_ssh_user | default(ansible_user) }}"
+        mode: '0644'
+
+    # ---- Azure CLI via apt repo (idempotent) ----
+    - name: Ensure repo prerequisites are installed
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - gnupg
+          - apt-transport-https
+          - lsb-release
+        state: present
+        update_cache: true
+
+    - name: Create keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Install Microsoft signing key (Azure CLI)
+      ansible.builtin.get_url:
+        url: https://packages.microsoft.com/keys/microsoft.asc
+        dest: /etc/apt/keyrings/microsoft.asc
+        mode: '0644'
+
+    - name: Add Azure CLI apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ azure_cli_arch }} signed-by=/etc/apt/keyrings/microsoft.asc]
+          https://packages.microsoft.com/repos/azure-cli/ {{ azure_cli_codename }} main
+        filename: azure-cli
+        state: present
+        update_cache: true
+
+    - name: Install Azure CLI
+      ansible.builtin.apt:
+        name: azure-cli
+        state: present
+
+    # ---- HashiCorp (Terraform) via apt repo (idempotent, no shell/pipe) ----
+    - name: Download HashiCorp GPG key (ASCII)
+      ansible.builtin.get_url:
+        url: https://apt.releases.hashicorp.com/gpg
+        dest: /tmp/hashicorp.asc
+        mode: '0644'
+
+    - name: Convert and install HashiCorp key (dearmored)
+      ansible.builtin.command:
+        cmd: gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg /tmp/hashicorp.asc
+      args:
+        creates: /usr/share/keyrings/hashicorp-archive-keyring.gpg
+
+    - name: Remove temporary HashiCorp key
+      ansible.builtin.file:
+        path: /tmp/hashicorp.asc
+        state: absent
+
+    - name: Add HashiCorp apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ azure_cli_arch }} signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg]
+          https://apt.releases.hashicorp.com {{ ansible_facts['lsb']['codename'] | default('bookworm') }} main
+        filename: hashicorp
+        state: present
+        update_cache: true
+
+    - name: Install Terraform
+      ansible.builtin.apt:
+        name: terraform
+        state: present
