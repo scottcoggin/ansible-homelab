@@ -1,0 +1,6 @@
+[debian]
+# Replace with your Debian system's IP address
+10.0.0.50 ansible_user=your_username ansible_become=yes
+
+# Additional hosts can be added like:
+# 10.0.0.51 ansible_user=your_username ansible_become=yes

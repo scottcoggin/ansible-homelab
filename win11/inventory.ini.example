@@ -1,0 +1,20 @@
+[windows]
+# Replace with your Windows system's IP address
+10.0.0.49
+
+[windows:vars]
+ansible_connection=winrm
+ansible_port=5985
+ansible_winrm_scheme=http
+ansible_winrm_transport=ntlm
+# Use local account (.\username) or domain account (DOMAIN\username)
+ansible_user=.\ansible
+# Reference encrypted password from vault.yml
+ansible_password={{ vault_ansible_password }}
+
+# Git configuration - replace with your details
+git_user_name=Your Name
+git_user_email=you@example.com
+
+# Windows user for SSH key generation - replace with actual username
+windows_user=youruser

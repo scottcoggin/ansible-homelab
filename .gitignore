@@ -2,16 +2,19 @@
 *.ini
 **/*.ini
 
-# But keep ansible.cfg (and other whitelisted configs)
+# But keep ansible.cfg and example files
 !ansible.cfg
+!*.example
 
 # Ignore Ansible cache and local state
 .ansible/
 *.retry
 
-# Ignore vault files with secrets
+# Ignore vault files with secrets (but keep examples)
 vault.yml
 **/vault.yml
+!vault.yml.example
+!**/vault.yml.example
 
 # Python virtual environments
 .venv/

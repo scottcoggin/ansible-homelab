@@ -63,20 +63,11 @@ ansible-playbook -i inventory.ini win11.yml --ask-vault-pass
 
 Create `inventory.ini` in this directory with your Windows host details:
 
-```ini
-[windows]
-10.0.0.49
-
-[windows:vars]
-ansible_connection=winrm
-ansible_port=5985
-ansible_winrm_scheme=http
-ansible_winrm_transport=ntlm
-ansible_user=.\ansible
-ansible_password={{ vault_ansible_password }}
-git_user_name=Your Name
-git_user_email=you@example.com
-windows_user=youruser
+```bash
+# Copy the example and customize it
+cp inventory.ini.example inventory.ini
+# Edit with your actual details
+nano inventory.ini
 ```
 
 **Note**: All `.ini` files are gitignored for security. The `ansible_password` references an encrypted variable from `vault.yml`.
@@ -85,14 +76,12 @@ windows_user=youruser
 
 Create `vault.yml` in this directory with encrypted secrets:
 
-```yaml
-vault_ansible_password: "your_ansible_password"
-windows_product_key: "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
-ssh_passphrase: "your_ssh_key_passphrase"
-```
-
-Encrypt it with:
 ```bash
+# Copy the example and add your actual secrets
+cp vault.yml.example vault.yml
+# Edit with your actual values
+nano vault.yml
+# Encrypt it
 ansible-vault encrypt vault.yml
 ```
 

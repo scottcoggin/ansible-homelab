@@ -1,0 +1,17 @@
+---
+# This is an example vault file. Create your own vault.yml with actual secrets.
+#
+# To create an encrypted vault.yml:
+# 1. Copy this file: cp vault.yml.example vault.yml
+# 2. Edit vault.yml with your actual secrets
+# 3. Encrypt it: ansible-vault encrypt vault.yml
+# 4. When running the playbook, use: ansible-playbook -i inventory.ini win11.yml --ask-vault-pass
+
+# Password for the Ansible service account on Windows
+vault_ansible_password: "your_ansible_service_account_password"
+
+# Windows product key (25 characters in XXXXX-XXXXX-XXXXX-XXXXX-XXXXX format)
+windows_product_key: "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
+
+# Passphrase for SSH key generation
+ssh_passphrase: "your_ssh_key_passphrase"

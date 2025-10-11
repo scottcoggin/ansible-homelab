@@ -17,4 +17,3 @@ antigen theme robbyrussell
 antigen apply
 
 source ~/bin/env.sh
-

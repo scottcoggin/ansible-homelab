@@ -15,6 +15,15 @@ Each directory contains its own README with detailed usage instructions.
 - SSH access to Debian systems
 - WinRM configured on Windows systems
 
+## Getting Started
+
+1. Clone this repository
+2. Copy example configuration files and customize them:
+   - `debian13/inventory.ini.example` → `inventory.ini`
+   - `win11/inventory.ini.example` → `inventory.ini`
+   - `win11/vault.yml.example` → `vault.yml` (then encrypt with `ansible-vault encrypt vault.yml`)
+3. Run the playbooks (see Quick Start below)
+
 ## Quick Start
 
 ```bash
@@ -29,7 +38,14 @@ ansible-playbook -i inventory.ini win11.yml --ask-vault-pass
 
 ## Inventory Files
 
-Inventory files (`inventory.ini`) contain IP addresses and credentials and are gitignored for security. Create them in each playbook directory as needed.
+Inventory files (`inventory.ini`) contain IP addresses and credentials and are gitignored for security. Example files are provided in each directory:
+
+```bash
+# Copy the example and customize it
+cd debian13  # or win11
+cp inventory.ini.example inventory.ini
+nano inventory.ini  # Edit with your actual details
+```
 
 ## General Notes
 

@@ -21,6 +21,14 @@ ansible-playbook -i inventory.ini debian13.yml
 
 Create `inventory.ini` in this directory with your Debian host details:
 
+```bash
+# Copy the example and customize it
+cp inventory.ini.example inventory.ini
+# Edit with your actual IP address and username
+nano inventory.ini
+```
+
+Example format:
 ```ini
 [debian]
 10.0.0.50 ansible_user=your_user ansible_become=yes
